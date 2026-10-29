@@ -1,31 +1,50 @@
-
 <!DOCTYPE html>
 <html lang="ru">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Наше Аниме</title>
+  <title>Наше Аниме — Онлайн</title>
+
   <style>
     body {
       margin: 0;
+      padding: 0 10px 30px;
       background: #111;
       color: white;
       font-family: sans-serif;
       text-align: center;
     }
-    h2 { padding: 12px; }
+
+    h2 {
+      padding: 12px;
+      margin: 12px 0;
+    }
+
     iframe {
+      display: block;
       width: 100%;
       max-width: 960px;
       aspect-ratio: 16 / 9;
       border: 0;
+      margin: 0 auto 30px;
+      background: #000;
     }
   </style>
 </head>
+
 <body>
   <h2>Наше Аниме</h2>
+
   <iframe
     src="https://rutube.ru/play/embed/ec5267347fa50d03edba227906eba679"
+    allow="autoplay; clipboard-write"
+    allowfullscreen>
+  </iframe>
+
+  <h2>Анимач — аниме онлайн</h2>
+
+  <iframe
+    src="https://rutube.ru/play/embed/b3019a8983105f5e33f038246f860c32"
     allow="autoplay; clipboard-write"
     allowfullscreen>
   </iframe>
