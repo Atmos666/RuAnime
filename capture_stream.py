@@ -23,7 +23,7 @@ CHANNELS = [
 
 
 def get_stream(channel):
-    url = f"https://rutube.ru/live/video/{channel['id']}/"
+    url = f"https://rutube.ru/live/video/{channel['id']}/?no_404=true"
 
     options = {
         "quiet": True,
