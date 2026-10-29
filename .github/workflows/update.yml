@@ -1,9 +1,10 @@
-
+```yaml
 name: Update and publish anime playlist
 
 on:
   workflow_dispatch:
-
+  schedule:
+    - cron: "0 */6 * * *"
 
 permissions:
   contents: read
@@ -31,11 +32,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install requests
+      - name: Install Playwright
+        run: |
+          python -m pip install --upgrade pip
+          pip install playwright
 
-      - name: Update anime playlist
-        run: python update_anime.py
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Capture streams and update playlist
+        run: python capture_stream.py
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
@@ -48,3 +54,4 @@ jobs:
       - name: Deploy
         id: deployment
         uses: actions/deploy-pages@v4
+```
