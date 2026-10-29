@@ -1,12 +1,13 @@
 
 import json
 import sys
+import uuid
 from pathlib import Path
-from urllib.parse import urlencode
 
 import requests
 
 OUTPUT_FILE = Path("anime.m3u")
+API_URL = "https://rutube.ru/api/play/options/{video_id}/"
 
 CHANNELS = [
     {
@@ -21,23 +22,20 @@ CHANNELS = [
     },
 ]
 
-HEADERS = {
-    "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-        "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/131.0.0.0 Safari/537.36"
-    ),
-    "Accept": "application/json, text/plain, */*",
-}
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
 
 
 def read_existing():
-    """Сохраняем прежние URL как резерв, если API недоступен."""
     result = {}
     if not OUTPUT_FILE.exists():
         return result
 
     current_name = None
+
     for line in OUTPUT_FILE.read_text(
         encoding="utf-8-sig"
     ).splitlines():
@@ -46,10 +44,10 @@ def read_existing():
         if line.startswith("#EXTINF"):
             current_name = next(
                 (
-                    c["name"]
-                    for c in CHANNELS
-                    if c["name"] in line
-                    or c["tvg"] in line
+                    channel["name"]
+                    for channel in CHANNELS
+                    if channel["name"] in line
+                    or channel["tvg"] in line
                 ),
                 None,
             )
@@ -60,96 +58,90 @@ def read_existing():
     return result
 
 
+def get_stream_url(session, channel):
+    video_id = channel["id"]
+    page_url = f"https://rutube.ru/live/video/{video_id}/"
 
-def get_stream_url():
-    import uuid
+    print(f"Запрашиваю: {channel['name']}")
 
-    print("Запрашиваю поток «Наше Аниме»...")
+    session.get(
+        "https://rutube.ru/",
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml",
+        },
+        timeout=30,
+    )
 
-    with requests.Session() as session:
-        # Сначала открываем страницу, чтобы получить cookies.
-        page = session.get(
-            "https://rutube.ru/",
-            headers={
-                "User-Agent": HEADERS["User-Agent"],
-                "Accept": "text/html,application/xhtml+xml",
-            },
-            timeout=30,
-        )
-        print(f"Страница RUTUBE: HTTP {page.status_code}")
+    params = {
+        "no_404": "true",
+        "referer": "https%3A%2F%2Frutube.ru",
+        "pver": "v2",
+        "client": "wdp",
+        "mq": "all",
+        "av1": "1",
+        "ac_client": "web",
+        "ver": "358.0.2",
+        "ad_ver": "v2",
+        "cvid": uuid.uuid4().hex,
+        "ac_request_id": str(uuid.uuid4()),
+    }
 
-        params = {
-            "no_404": "true",
-            # Двойное кодирование соответствует наблюдавшемуся
-            # в браузере формату параметра referer.
-            "referer": "https%3A%2F%2Frutube.ru",
-            "pver": "v2",
-            "client": "wdp",
-            "mq": "all",
-            "av1": "1",
-            "ac_client": "web",
-            "ver": "358.0.2",
-            "ad_ver": "v2",
-            "cvid": uuid.uuid4().hex,
-            "ac_request_id": str(uuid.uuid4()),
-        }
-
-        headers = {
-            **HEADERS,
-            "Referer": "https://rutube.ru/",
+    response = session.get(
+        API_URL.format(video_id=video_id),
+        params=params,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json, text/plain, */*",
+            "Referer": page_url,
             "Origin": "https://rutube.ru",
-        }
+        },
+        timeout=30,
+    )
 
-        response = session.get(
-            API_URL,
-            params=params,
-            headers=headers,
-            timeout=30,
-        )
+    print(f"{channel['name']}: HTTP {response.status_code}")
 
-        print(f"Наше Аниме: HTTP {response.status_code}")
-
-        try:
-            data = response.json()
-        except ValueError:
-            raise RuntimeError(
-                f"RUTUBE вернул не JSON: {response.text[:300]}"
-            )
-
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"API недоступен: HTTP {response.status_code}; "
-                f"ответ: {json.dumps(data, ensure_ascii=False)[:500]}. "
-                "Старый плейлист не изменён."
-            )
-
-        detail = data.get("detail")
-        if isinstance(detail, dict) and detail.get("type") == "blocking_rule":
-            raise RuntimeError(
-                "RUTUBE заблокировал запрос (blocking_rule). "
-                "Старый плейлист не изменён."
-            )
-
-        streams = data.get("live_streams") or {}
-        hls = streams.get("hls", [])
-
-        if isinstance(hls, dict):
-            hls = list(hls.values())
-        elif isinstance(hls, str):
-            hls = [hls]
-
-        for item in hls:
-            url = item if isinstance(item, str) else (
-                item.get("url") if isinstance(item, dict) else None
-            )
-            if isinstance(url, str) and url.startswith("https://"):
-                return url
-
+    try:
+        data = response.json()
+    except ValueError:
         raise RuntimeError(
-            "RUTUBE ответил, но ссылка HLS не найдена. "
-            f"Ключи ответа: {list(data.keys())}"
+            f"{channel['name']}: ответ не JSON: "
+            f"{response.text[:300]}"
         )
 
+    if response.status_code != 200:
+        raise RuntimeError(
+            f"{channel['name']}: HTTP {response.status_code}; "
+            f"{json.dumps(data, ensure_ascii=False)[:500]}"
+        )
+
+    detail = data.get("detail")
+    if isinstance(detail, dict) and detail.get("type") == "blocking_rule":
+        raise RuntimeError(
+            f"{channel['name']}: RUTUBE blocking_rule"
+        )
+
+    streams = data.get("live_streams") or {}
+    hls = streams.get("hls", [])
+
+    if isinstance(hls, dict):
+        hls = list(hls.values())
+    elif isinstance(hls, str):
+        hls = [hls]
+
+    for item in hls:
+        url = (
+            item if isinstance(item, str)
+            else item.get("url") if isinstance(item, dict)
+            else None
+        )
+        if isinstance(url, str) and url.startswith("https://"):
+            return url
+
+    raise RuntimeError(
+        f"{channel['name']}: HLS-ссылка не найдена; "
+        f"ключи ответа: {list(data.keys())}"
+    )
 
 
 def main():
@@ -157,13 +149,15 @@ def main():
     new_urls = {}
 
     with requests.Session() as session:
-        # Сначала получаем все ссылки. Файл пока не трогаем.
         for channel in CHANNELS:
             new_urls[channel["name"]] = get_stream_url(
                 session, channel
             )
 
-    # Записываем только если оба канала обновились успешно.
+    # Не заменяем плейлист, если какой-то канал отсутствует.
+    if len(new_urls) != len(CHANNELS):
+        raise RuntimeError("Получены не все ссылки. Плейлист не изменён.")
+
     lines = ["#EXTM3U"]
 
     for channel in CHANNELS:
@@ -174,10 +168,9 @@ def main():
         )
         lines.append(url)
 
-    OUTPUT_FILE.write_text(
-        "\n".join(lines) + "\n",
-        encoding="utf-8",
-    )
+    temp_file = OUTPUT_FILE.with_suffix(".m3u.tmp")
+    temp_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    temp_file.replace(OUTPUT_FILE)
 
     print("Оба потока получены. Плейлист обновлён.")
 
@@ -186,5 +179,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as error:
-        print(f"ОШИБКА: {error}")
+        print(f"ОШИБКА: {error}", file=sys.stderr)
         sys.exit(1)
