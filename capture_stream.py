@@ -1,11 +1,15 @@
+
+import json
 import os
 import sys
-from pathlib import Path
 from urllib.parse import urlparse
 
 from playwright.sync_api import sync_playwright
 
-BRAVE = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
+BRAVE = (
+    r"C:\Program Files\BraveSoftware\Brave-Browser"
+    r"\Application\brave.exe"
+)
 
 CHANNELS = [
     {
@@ -19,48 +23,80 @@ CHANNELS = [
 ]
 
 
+def inspect_response(response, channel_id):
+    url = response.url
+    path = urlparse(url).path.lower()
+
+    relevant = (
+        f"/api/v2/video/stream/{channel_id}/info/" in path
+        or "/api/play/options/" in path
+        or "/api/v2/video/stream/tvbroadcastinfo" in path
+    )
+
+    if not relevant:
+        return
+
+    print("\n" + "=" * 70, flush=True)
+    print(f"API URL: {url.split('?', 1)[0]}", flush=True)
+    print(f"HTTP STATUS: {response.status}", flush=True)
+
+    try:
+        body = response.text()
+    except Exception as error:
+        print(f"BODY READ ERROR: {error}", flush=True)
+        return
+
+    try:
+        data = json.loads(body)
+        print("JSON RESPONSE:", flush=True)
+        print(
+            json.dumps(data, ensure_ascii=False, indent=2)[:10000],
+            flush=True,
+        )
+    except json.JSONDecodeError:
+        print("TEXT RESPONSE:", flush=True)
+        print(body[:5000], flush=True)
+
+    print("=" * 70, flush=True)
+
+
 def diagnose(browser, channel):
-    video_id = channel["id"]
-    page_url = f"https://rutube.ru/live/video/{video_id}/"
+    channel_id = channel["id"]
+    page_url = f"https://rutube.ru/live/video/{channel_id}/"
+
+    print("\n" + "#" * 70, flush=True)
+    print(f"CHANNEL: {channel['name']}", flush=True)
+    print(f"PAGE: {page_url}", flush=True)
+
     page = browser.new_page()
-    requests_seen = 0
-    stream_candidates = []
-
-    def on_request(request):
-        nonlocal requests_seen
-        url = request.url
-        host = urlparse(url).netloc.lower()
-
-        if "rutube" in host or "rtbcdn" in host:
-            requests_seen += 1
-
-            if any(word in url.lower() for word in (
-                ".m3u8", ".mpd", ".m4s", ".ts", "hls", "stream"
-            )):
-                safe_url = url.split("?", 1)[0]
-                stream_candidates.append(safe_url)
-                print(f"MEDIA REQUEST: {safe_url}", flush=True)
+    seen_urls = set()
 
     def on_response(response):
-        host = urlparse(response.url).netloc.lower()
-        if "rutube" in host and response.status >= 400:
+        url = response.url
+        path = urlparse(url).path.lower()
+
+        if (
+            f"/api/v2/video/stream/{channel_id}/info/" in path
+            or "/api/play/options/" in path
+            or "/api/v2/video/stream/tvbroadcastinfo" in path
+        ):
+            if url not in seen_urls:
+                seen_urls.add(url)
+                inspect_response(response, channel_id)
+
+        if (
+            "rutube" in urlparse(url).netloc.lower()
+            and response.status >= 400
+        ):
             print(
                 f"HTTP ERROR {response.status}: "
-                f"{response.url.split('?', 1)[0]}",
+                f"{url.split('?', 1)[0]}",
                 flush=True,
             )
 
-    def on_page_error(error):
-        print(f"PAGE JS ERROR: {error}", flush=True)
-
-    page.on("request", on_request)
     page.on("response", on_response)
-    page.on("pageerror", on_page_error)
 
     try:
-        print(f"\n=== DIAGNOSIS: {channel['name']} ===", flush=True)
-        print(f"Opening: {page_url}", flush=True)
-
         response = page.goto(
             page_url,
             wait_until="domcontentloaded",
@@ -68,33 +104,64 @@ def diagnose(browser, channel):
         )
 
         print(
-            f"PAGE RESPONSE: {response.status if response else 'none'}",
+            f"PAGE STATUS: {response.status if response else 'unknown'}",
             flush=True,
         )
         print(f"FINAL URL: {page.url}", flush=True)
 
-        for _ in range(45):
+        for second in range(30):
             page.wait_for_timeout(1000)
 
+            if second in (9, 19, 29):
+                print(
+                    f"Waiting for player/API: {second + 1}/30 seconds",
+                    flush=True,
+                )
+
         print(f"PAGE TITLE: {page.title()}", flush=True)
-        print(f"RUTUBE REQUEST COUNT: {requests_seen}", flush=True)
-        print(f"MEDIA CANDIDATES: {len(stream_candidates)}", flush=True)
 
-        screenshot = Path(f"diagnostic-{video_id}.png")
-        page.screenshot(path=str(screenshot), full_page=True)
-        print(f"SCREENSHOT SAVED: {screenshot}", flush=True)
+        try:
+            print(
+                "PAGE TEXT:",
+                page.locator("body").inner_text(timeout=10000)[:2000],
+                flush=True,
+            )
+        except Exception as error:
+            print(f"PAGE TEXT ERROR: {error}", flush=True)
 
-        text = page.locator("body").inner_text(timeout=10000)
-        print("PAGE TEXT:", flush=True)
-        print(text[:2500], flush=True)
-
-    except Exception as error:
         print(
-            f"DIAGNOSTIC ERROR for {channel['name']}: "
-            f"{type(error).__name__}: {error}",
+            f"RELEVANT API RESPONSES: {len(seen_urls)}",
             flush=True,
         )
 
+        print("Trying to inspect video/player elements...", flush=True)
+        try:
+            elements = page.locator(
+                "video, iframe, [class*='player'], "
+                "[class*='Player'], [data-testid*='player']"
+            )
+            count = min(elements.count(), 20)
+
+            for index in range(count):
+                element = elements.nth(index)
+                try:
+                    print(
+                        f"ELEMENT {index}: "
+                        f"{element.evaluate('el => el.tagName')} "
+                        f"{element.get_attribute('class')} "
+                        f"src={element.get_attribute('src')}",
+                        flush=True,
+                    )
+                except Exception:
+                    pass
+        except Exception as error:
+            print(f"ELEMENT INSPECTION ERROR: {error}", flush=True)
+
+    except Exception as error:
+        print(
+            f"DIAGNOSTIC ERROR: {type(error).__name__}: {error}",
+            flush=True,
+        )
     finally:
         page.close()
 
@@ -102,11 +169,11 @@ def diagnose(browser, channel):
 def main():
     is_github = os.getenv("GITHUB_ACTIONS") == "true"
 
-    with sync_playwright() as p:
+    with sync_playwright() as playwright:
         if is_github:
-            browser = p.chromium.launch(headless=True)
+            browser = playwright.chromium.launch(headless=True)
         else:
-            browser = p.chromium.launch(
+            browser = playwright.chromium.launch(
                 executable_path=BRAVE,
                 headless=False,
             )
@@ -122,5 +189,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as error:
-        print(f"FATAL ERROR: {error}", file=sys.stderr)
+        print(f"FATAL ERROR: {type(error).__name__}: {error}", file=sys.stderr)
         sys.exit(1)
