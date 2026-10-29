@@ -1,11 +1,13 @@
 
-name: Publish GitHub Pages
+name: Update and publish anime playlist
 
 on:
   workflow_dispatch:
   push:
     branches:
       - main
+  schedule:
+    - cron: "0 3 * * *"
 
 permissions:
   contents: read
@@ -19,6 +21,7 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -26,6 +29,17 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Update anime playlist
+        run: python update_anime.py
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
