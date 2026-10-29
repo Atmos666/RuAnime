@@ -1,84 +1,107 @@
 
 import json
 import sys
-import urllib.request
-import urllib.error
 from pathlib import Path
+
+import requests
 
 VIDEO_ID = "ec5267347fa50d03edba227906eba679"
 PAGE_URL = f"https://rutube.ru/live/video/{VIDEO_ID}/"
-OUTPUT = Path(__file__).with_name("anime.m3u")
 
-api_url = (
+API_URL = (
     f"https://rutube.ru/api/play/options/{VIDEO_ID}/"
-    "?format=json"
-    "&no_404=true"
-    "&referer=https%253A%252F%252Frutube.ru%252Ffeeds%252Flive%252F"
-    "&pver=v2"
-    "&platform=player-carousel"
+    "?format=json&no_404=true"
 )
 
-headers = {
+OUTPUT_FILE = Path("anime.m3u")
+
+HEADERS = {
     "User-Agent": (
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) "
-        "Gecko/20100101 Firefox/131.0"
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/131.0.0.0 Safari/537.36"
     ),
-    "Referer": PAGE_URL,
     "Accept": "application/json",
+    "Referer": PAGE_URL,
 }
 
-try:
-    request = urllib.request.Request(api_url, headers=headers)
 
-    with urllib.request.urlopen(request, timeout=30) as response:
-        print(f"HTTP status: {response.status}")
-        data = json.loads(response.read().decode("utf-8"))
+def get_stream_url():
+    print("Запрашиваю актуальный поток RUTUBE...")
 
-    live_streams = data.get("live_streams") or {}
-    hls = live_streams.get("hls") or []
+    response = requests.get(
+        API_URL,
+        headers=HEADERS,
+        timeout=25,
+    )
+
+    print(f"HTTP status: {response.status_code}")
+
+    try:
+        data = response.json()
+    except ValueError:
+        raise RuntimeError(
+            "RUTUBE вернул не JSON. "
+            f"Ответ: {response.text[:300]}"
+        )
+
+    # В том числе обрабатываем блокировку RUTUBE
+    if response.status_code != 200:
+        detail = data.get("detail", data)
+        raise RuntimeError(
+            f"RUTUBE вернул HTTP {response.status_code}: "
+            f"{json.dumps(detail, ensure_ascii=False)[:500]}"
+        )
+
+    if isinstance(data.get("detail"), dict):
+        detail = data["detail"]
+        if detail.get("type") == "blocking_rule":
+            raise RuntimeError(
+                "RUTUBE заблокировал API-запрос. "
+                "GitHub Actions не сможет обновить ссылку "
+                "этим способом, пока запросы отклоняются."
+            )
+
+    streams = data.get("live_streams", {})
+    hls = streams.get("hls", [])
 
     if isinstance(hls, dict):
         hls = list(hls.values())
 
-    urls = []
-    for item in hls:
-        if isinstance(item, dict) and item.get("url"):
-            urls.append(item["url"])
-        elif isinstance(item, str) and item.startswith("https://"):
-            urls.append(item)
+    for stream in hls:
+        if isinstance(stream, dict):
+            url = stream.get("url")
+            if url and url.startswith("https://"):
+                return url
 
-    if not urls:
-        video_balancer = data.get("video_balancer") or {}
-        m3u8 = video_balancer.get("m3u8")
+    # Иногда API может вернуть другую структуру
+    print("Не найдены live_streams.hls.")
+    print("Ключи ответа:", list(data.keys()))
 
-        if isinstance(m3u8, str) and m3u8.startswith("https://"):
-            urls.append(m3u8)
-
-    if not urls:
-        print("No HLS stream found.")
-        print("Top-level JSON keys:", list(data.keys()))
-
-        detail = data.get("detail")
-        if isinstance(detail, dict):
-            print("Detail keys:", list(detail.keys()))
-            print("Detail type:", detail.get("type"))
-            print("Detail name:", detail.get("name"))
-
-        sys.exit(1)
-
-    playlist = (
-        "#EXTM3U\n"
-        "#EXTINF:-1,Our Anime\n"
-        f"{urls[0]}\n"
+    raise RuntimeError(
+        "Прямая ссылка на HLS-поток не найдена."
     )
 
-    OUTPUT.write_text(playlist, encoding="utf-8")
-    print(f"Playlist updated: {OUTPUT}")
 
-except urllib.error.HTTPError as error:
-    print(f"HTTP error: {error.code}")
-    sys.exit(1)
+def main():
+    try:
+        stream_url = get_stream_url()
 
-except Exception as error:
-    print(f"Request failed: {type(error).__name__}: {error}")
-    sys.exit(1)
+        playlist = (
+            "#EXTM3U\n"
+            "#EXTINF:-1 tvg-name=\"Наше Аниме\" "
+            "group-title=\"Аниме\",Наше Аниме\n"
+            f"{stream_url}\n"
+        )
+
+        OUTPUT_FILE.write_text(playlist, encoding="utf-8")
+
+        print(f"Плейлист обновлён: {OUTPUT_FILE.resolve()}")
+
+    except Exception as error:
+        print(f"ОШИБКА: {error}")
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()
