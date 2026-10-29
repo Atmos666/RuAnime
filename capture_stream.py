@@ -1,11 +1,12 @@
 
+import json
 import os
 import sys
 from pathlib import Path
-
 from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
 
 PLAYLIST = Path(__file__).with_name("anime.m3u")
+BRAVE_LINUX = "/usr/bin/brave-browser"
 
 CHANNELS = [
     {
@@ -20,91 +21,70 @@ CHANNELS = [
     },
 ]
 
-IS_GITHUB = os.getenv("GITHUB_ACTIONS") == "true"
-
-BRAVE_WINDOWS = (
-    r"C:\Program Files\BraveSoftware\Brave-Browser"
-    r"\Application\brave.exe"
-)
-BRAVE_LINUX = "/usr/bin/brave-browser"
-
-
-def capture_stream(browser, channel):
+def capture_stream(context, channel):
     video_id = channel["id"]
     page_url = f"https://rutube.ru/live/video/{video_id}/"
-
-    page = browser.new_page()
+    page = context.new_page()
     found = []
-    blocked = []
+    api_statuses = []
 
     def on_request(request):
         url = request.url.lower()
-
-        if (
-            ".m3u8" in url
-            and video_id in url
-            and "rtbcdn.ru" in url
-        ):
+        if ".m3u8" in url and video_id in url and "rtbcdn.ru" in url:
             if request.url not in found:
                 found.append(request.url)
-                print(
-                    f"STREAM CAPTURED: {channel['name']}",
-                    flush=True,
-                )
 
     def on_response(response):
-        url = response.url
-        if "/api/play/options/" in url:
-            print(
-                f"PLAYER API STATUS: {response.status} "
-                f"({channel['name']})",
-                flush=True,
-            )
+        url = response.url.lower()
+
+        if "/api/play/options/" in url and video_id in url:
+            api_statuses.append(response.status)
+            print(f"PLAYER API STATUS: {response.status} ({channel['name']})")
+
             if response.status == 244:
-                blocked.append(response.status)
+                try:
+                    data = response.json()
+                    detail = data.get("detail", data)
+                    print("RUTUBE BLOCK DETAILS:")
+                    print(json.dumps(detail, ensure_ascii=False, indent=2)[:5000])
+                except Exception as error:
+                    print(f"Could not read block response: {error}")
+
+        if ".m3u8" in url and video_id in url and "rtbcdn.ru" in url:
+            print(f"M3U8 RESPONSE: {response.status} ({channel['name']})")
 
     page.on("request", on_request)
     page.on("response", on_response)
 
     try:
-        print(f"\nOpening: {channel['name']}", flush=True)
-        print(f"Browser: {'Brave on GitHub' if IS_GITHUB else 'Local Brave'}", flush=True)
-
+        print(f"\nOpening: {channel['name']}")
         response = page.goto(
             page_url,
             wait_until="domcontentloaded",
             timeout=60000,
         )
+        print(f"PAGE STATUS: {response.status if response else 'unknown'}")
 
-        print(
-            f"PAGE STATUS: {response.status if response else 'unknown'}",
-            flush=True,
-        )
-
-        for _ in range(180):
+        for _ in range(90):
             page.wait_for_timeout(1000)
-
             if found:
+                print(f"STREAM CAPTURED: {channel['name']}")
                 return found[0]
 
-        if blocked:
+        if 244 in api_statuses:
             raise RuntimeError(
-                f"RUTUBE blocked the player API for {channel['name']} "
-                f"(HTTP 244); no stream URL was captured."
+                f"RUTUBE returned HTTP 244 for {channel['name']}; "
+                "see RUTUBE BLOCK DETAILS above."
             )
 
         raise RuntimeError(
-            f"Stream not found for {channel['name']} after 180 seconds."
+            f"No HLS stream captured for {channel['name']}. "
+            f"API statuses: {api_statuses}"
         )
-
     except PlaywrightTimeoutError as error:
-        raise RuntimeError(
-            f"Timed out while opening {channel['name']}."
-        ) from error
-
+        raise RuntimeError(f"Timed out loading {channel['name']}") from error
     finally:
         page.close()
-
 
 def update_playlist(urls):
     lines = ["#EXTM3U"]
@@ -112,8 +92,8 @@ def update_playlist(urls):
     for channel in CHANNELS:
         url = urls[channel["id"]]
         lines.append(
-            f'#EXTINF:-1 {channel["tvg"]} '
-            f'group-title="Аниме",{channel["name"]}'
+            f'#EXTINF:-1 {channel["tvg"]} group-title="Аниме",'
+            f'{channel["name"]}'
         )
         lines.append(url)
         lines.append("")
@@ -123,48 +103,55 @@ def update_playlist(urls):
     temp.write_text(content, encoding="utf-8")
     os.replace(temp, PLAYLIST)
 
-
 def main():
+    if not Path(BRAVE_LINUX).exists():
+        raise RuntimeError(f"Brave not found at {BRAVE_LINUX}")
+
     urls = {}
 
     with sync_playwright() as p:
-        if IS_GITHUB:
-            browser = p.chromium.launch(
-                executable_path=BRAVE_LINUX,
-                headless=True,
-                args=["--no-sandbox", "--disable-dev-shm-usage"],
-            )
-        else:
-            browser = p.chromium.launch(
-                executable_path=BRAVE_WINDOWS,
-                headless=False,
-            )
+        browser = p.chromium.launch(
+            executable_path=BRAVE_LINUX,
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--lang=ru-RU",
+            ],
+        )
+
+        context = browser.new_context(
+            locale="ru-RU",
+            timezone_id="Europe/Moscow",
+            user_agent=(
+                "Mozilla/5.0 (X11; Linux x86_64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            extra_http_headers={
+                "Accept-Language": "ru-RU,ru;q=0.9",
+            },
+        )
 
         try:
             for channel in CHANNELS:
-                urls[channel["id"]] = capture_stream(browser, channel)
+                urls[channel["id"]] = capture_stream(context, channel)
         finally:
+            context.close()
             browser.close()
 
     if len(urls) != len(CHANNELS):
-        raise RuntimeError(
-            "Not all streams were captured; playlist unchanged."
-        )
+        raise RuntimeError("Not all streams captured; playlist not updated.")
 
     update_playlist(urls)
-
-    print("\nSUCCESS: both stream URLs updated.", flush=True)
-    print("Playlist saved as UTF-8.", flush=True)
-
+    print("\nSUCCESS: both stream URLs updated.")
+    print(f"Playlist: {PLAYLIST}")
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as error:
-        print(f"\nERROR: {error}", file=sys.stderr, flush=True)
-        print(
-            "Playlist was not rewritten unless the update completed.",
-            file=sys.stderr,
-            flush=True,
-        )
+        print(f"\nERROR: {error}", file=sys.stderr)
+        print("Existing playlist was not overwritten.")
         sys.exit(1)
