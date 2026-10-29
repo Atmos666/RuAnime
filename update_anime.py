@@ -60,60 +60,96 @@ def read_existing():
     return result
 
 
-def get_stream_url(session, channel):
-    video_id = channel["id"]
-    page_url = f"https://rutube.ru/live/video/{video_id}/"
 
-    params = {
-        "format": "json",
-        "no_404": "true",
-    }
+def get_stream_url():
+    import uuid
 
-    headers = {
-        **HEADERS,
-        "Referer": page_url,
-    }
+    print("Запрашиваю поток «Наше Аниме»...")
 
-    response = session.get(
-        f"https://rutube.ru/api/play/options/{video_id}/",
-        params=params,
-        headers=headers,
-        timeout=30,
-    )
+    with requests.Session() as session:
+        # Сначала открываем страницу, чтобы получить cookies.
+        page = session.get(
+            "https://rutube.ru/",
+            headers={
+                "User-Agent": HEADERS["User-Agent"],
+                "Accept": "text/html,application/xhtml+xml",
+            },
+            timeout=30,
+        )
+        print(f"Страница RUTUBE: HTTP {page.status_code}")
 
-    print(f'{channel["name"]}: HTTP {response.status_code}')
+        params = {
+            "no_404": "true",
+            # Двойное кодирование соответствует наблюдавшемуся
+            # в браузере формату параметра referer.
+            "referer": "https%3A%2F%2Frutube.ru",
+            "pver": "v2",
+            "client": "wdp",
+            "mq": "all",
+            "av1": "1",
+            "ac_client": "web",
+            "ver": "358.0.2",
+            "ad_ver": "v2",
+            "cvid": uuid.uuid4().hex,
+            "ac_request_id": str(uuid.uuid4()),
+        }
 
-    if response.status_code != 200:
-        raise RuntimeError(
-            f'API недоступен для {channel["name"]}: '
-            f'HTTP {response.status_code}; '
-            "старый плейлист не будет перезаписан."
+        headers = {
+            **HEADERS,
+            "Referer": "https://rutube.ru/",
+            "Origin": "https://rutube.ru",
+        }
+
+        response = session.get(
+            API_URL,
+            params=params,
+            headers=headers,
+            timeout=30,
         )
 
-    data = response.json()
+        print(f"Наше Аниме: HTTP {response.status_code}")
 
-    if isinstance(data.get("detail"), dict):
-        if data["detail"].get("type") == "blocking_rule":
+        try:
+            data = response.json()
+        except ValueError:
             raise RuntimeError(
-                "RUTUBE вернул blocking_rule. "
-                "Плейлист оставлен без изменений."
+                f"RUTUBE вернул не JSON: {response.text[:300]}"
             )
 
-    streams = data.get("live_streams", {})
-    hls = streams.get("hls", [])
+        if response.status_code != 200:
+            raise RuntimeError(
+                f"API недоступен: HTTP {response.status_code}; "
+                f"ответ: {json.dumps(data, ensure_ascii=False)[:500]}. "
+                "Старый плейлист не изменён."
+            )
 
-    if isinstance(hls, dict):
-        hls = list(hls.values())
+        detail = data.get("detail")
+        if isinstance(detail, dict) and detail.get("type") == "blocking_rule":
+            raise RuntimeError(
+                "RUTUBE заблокировал запрос (blocking_rule). "
+                "Старый плейлист не изменён."
+            )
 
-    for stream in hls:
-        if isinstance(stream, dict):
-            url = stream.get("url")
-            if url and url.startswith("https://"):
+        streams = data.get("live_streams") or {}
+        hls = streams.get("hls", [])
+
+        if isinstance(hls, dict):
+            hls = list(hls.values())
+        elif isinstance(hls, str):
+            hls = [hls]
+
+        for item in hls:
+            url = item if isinstance(item, str) else (
+                item.get("url") if isinstance(item, dict) else None
+            )
+            if isinstance(url, str) and url.startswith("https://"):
                 return url
 
-    raise RuntimeError(
-        f'В API не найден HLS-поток: {channel["name"]}'
-    )
+        raise RuntimeError(
+            "RUTUBE ответил, но ссылка HLS не найдена. "
+            f"Ключи ответа: {list(data.keys())}"
+        )
+
 
 
 def main():
