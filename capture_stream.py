@@ -1,98 +1,105 @@
 import os
 import sys
 from pathlib import Path
+from urllib.parse import urlparse
 
-from playwright.sync_api import sync_playwright, TimeoutError as PlaywrightTimeoutError
+from playwright.sync_api import sync_playwright
 
-PLAYLIST = Path(__file__).with_name("anime.m3u")
 BRAVE = r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe"
 
 CHANNELS = [
     {
         "id": "ec5267347fa50d03edba227906eba679",
         "name": "Наше Аниме",
-        "tvg": 'tvg-name="Наше Аниме"',
     },
     {
         "id": "b3019a8983105f5e33f038246f860c32",
         "name": "Анимач — аниме онлайн",
-        "tvg": 'tvg-id="animach"',
     },
 ]
 
 
-def capture_stream(browser, channel):
+def diagnose(browser, channel):
     video_id = channel["id"]
     page_url = f"https://rutube.ru/live/video/{video_id}/"
     page = browser.new_page()
-    found = []
+    requests_seen = 0
+    stream_candidates = []
 
     def on_request(request):
-        url = request.url.lower()
+        nonlocal requests_seen
+        url = request.url
+        host = urlparse(url).netloc.lower()
 
-        if (
-            ".m3u8" in url
-            and video_id in url
-            and "rtbcdn.ru" in url
-        ):
-            found.append(request.url)
+        if "rutube" in host or "rtbcdn" in host:
+            requests_seen += 1
+
+            if any(word in url.lower() for word in (
+                ".m3u8", ".mpd", ".m4s", ".ts", "hls", "stream"
+            )):
+                safe_url = url.split("?", 1)[0]
+                stream_candidates.append(safe_url)
+                print(f"MEDIA REQUEST: {safe_url}", flush=True)
+
+    def on_response(response):
+        host = urlparse(response.url).netloc.lower()
+        if "rutube" in host and response.status >= 400:
+            print(
+                f"HTTP ERROR {response.status}: "
+                f"{response.url.split('?', 1)[0]}",
+                flush=True,
+            )
+
+    def on_page_error(error):
+        print(f"PAGE JS ERROR: {error}", flush=True)
 
     page.on("request", on_request)
+    page.on("response", on_response)
+    page.on("pageerror", on_page_error)
 
     try:
-        print(f"\nOpening: {channel['name']}", flush=True)
+        print(f"\n=== DIAGNOSIS: {channel['name']} ===", flush=True)
+        print(f"Opening: {page_url}", flush=True)
 
-        page.goto(
+        response = page.goto(
             page_url,
             wait_until="domcontentloaded",
-            timeout=60000,
+            timeout=90000,
         )
 
-        for _ in range(180):
+        print(
+            f"PAGE RESPONSE: {response.status if response else 'none'}",
+            flush=True,
+        )
+        print(f"FINAL URL: {page.url}", flush=True)
+
+        for _ in range(45):
             page.wait_for_timeout(1000)
 
-            if found:
-                print(
-                    f"Stream captured: {channel['name']}",
-                    flush=True,
-                )
-                return found[0]
+        print(f"PAGE TITLE: {page.title()}", flush=True)
+        print(f"RUTUBE REQUEST COUNT: {requests_seen}", flush=True)
+        print(f"MEDIA CANDIDATES: {len(stream_candidates)}", flush=True)
 
-        raise RuntimeError(
-            f"Stream not found: {channel['name']}"
+        screenshot = Path(f"diagnostic-{video_id}.png")
+        page.screenshot(path=str(screenshot), full_page=True)
+        print(f"SCREENSHOT SAVED: {screenshot}", flush=True)
+
+        text = page.locator("body").inner_text(timeout=10000)
+        print("PAGE TEXT:", flush=True)
+        print(text[:2500], flush=True)
+
+    except Exception as error:
+        print(
+            f"DIAGNOSTIC ERROR for {channel['name']}: "
+            f"{type(error).__name__}: {error}",
+            flush=True,
         )
-
-    except PlaywrightTimeoutError as error:
-        raise RuntimeError(
-            f"Timed out: {channel['name']}"
-        ) from error
 
     finally:
         page.close()
 
 
-def update_playlist(urls):
-    lines = ["#EXTM3U"]
-
-    for channel in CHANNELS:
-        url = urls[channel["id"]]
-
-        lines.append(
-            f'#EXTINF:-1 {channel["tvg"]} '
-            f'group-title="Аниме",{channel["name"]}'
-        )
-        lines.append(url)
-        lines.append("")
-
-    content = "\n".join(lines).rstrip() + "\n"
-
-    temp = PLAYLIST.with_suffix(".m3u.tmp")
-    temp.write_text(content, encoding="utf-8")
-    os.replace(temp, PLAYLIST)
-
-
 def main():
-    urls = {}
     is_github = os.getenv("GITHUB_ACTIONS") == "true"
 
     with sync_playwright() as p:
@@ -106,31 +113,14 @@ def main():
 
         try:
             for channel in CHANNELS:
-                urls[channel["id"]] = capture_stream(
-                    browser,
-                    channel,
-                )
+                diagnose(browser, channel)
         finally:
             browser.close()
-
-    if len(urls) != len(CHANNELS):
-        raise RuntimeError(
-            "Not all streams were captured; playlist unchanged."
-        )
-
-    update_playlist(urls)
-
-    print("\nSUCCESS: both stream URLs updated.")
-    print("Playlist saved as UTF-8 with readable Russian names.")
 
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as error:
-        print(f"\nERROR: {error}", file=sys.stderr)
-        print(
-            "Playlist was not rewritten unless update had completed.",
-            file=sys.stderr,
-        )
+        print(f"FATAL ERROR: {error}", file=sys.stderr)
         sys.exit(1)
