@@ -2,12 +2,12 @@
 import json
 import os
 import sys
+import traceback
 from pathlib import Path
 from urllib.request import Request, build_opener, ProxyHandler
-from urllib.error import HTTPError
+from urllib.error import HTTPError, URLError
 
 PLAYLIST = Path(__file__).with_name("anime.m3u")
-
 PROXY = "http://127.0.0.1:10809"
 
 OPENER = build_opener(
@@ -42,6 +42,11 @@ def get_stream(channel):
     page_url = f"https://rutube.ru/live/video/{video_id}/"
     api_url = f"https://rutube.ru/api/play/options/{video_id}/"
 
+    print(f"\n{'=' * 55}", flush=True)
+    print(f"Checking: {channel['name']}", flush=True)
+    print(f"Video ID: {video_id}", flush=True)
+    print("Starting request...", flush=True)
+
     request = Request(
         api_url,
         headers={
@@ -52,43 +57,66 @@ def get_stream(channel):
         },
     )
 
-    print(f"\nChecking: {channel['name']}", flush=True)
-
     try:
-        with OPENER.open(request, timeout=40) as response:
+        print(f"Requesting API: {api_url}", flush=True)
+
+        with OPENER.open(request, timeout=60) as response:
             status = response.status
             body = response.read().decode(
-                "utf-8", errors="replace"
+                "utf-8",
+                errors="replace"
             )
+
+        print(f"Response received: HTTP {status}", flush=True)
 
     except HTTPError as error:
         status = error.code
         body = error.read().decode(
-            "utf-8", errors="replace"
+            "utf-8",
+            errors="replace"
         )
 
-    except Exception as error:
-        print(f"REQUEST FAILED: {error}")
+        print(f"HTTP ERROR: {status}", flush=True)
+        print("Response body:", flush=True)
+        print(body[:4000], flush=True)
+
+    except URLError as error:
+        print(
+            f"URL ERROR: {type(error).__name__}: {error}",
+            flush=True
+        )
+        traceback.print_exc()
         return None
 
-    print(f"API STATUS: {status}")
+    except Exception as error:
+        print(
+            f"REQUEST FAILED: {type(error).__name__}: {error}",
+            flush=True
+        )
+        traceback.print_exc()
+        return None
+
+    print(f"API STATUS: {status}", flush=True)
 
     try:
         data = json.loads(body)
-    except json.JSONDecodeError:
-        print("Invalid JSON response:")
-        print(body[:2000])
+    except json.JSONDecodeError as error:
+        print(f"INVALID JSON: {error}", flush=True)
+        print("Response body:", body[:4000], flush=True)
         return None
 
-    print("RESPONSE KEYS:", list(data.keys()))
+    print("RESPONSE KEYS:", list(data.keys()), flush=True)
 
     if "detail" in data:
-        print("RUTUBE BLOCK DETAILS:")
-        print(json.dumps(
-            data["detail"],
-            ensure_ascii=False,
-            indent=2
-        )[:4000])
+        print("RUTUBE BLOCK DETAILS:", flush=True)
+        print(
+            json.dumps(
+                data["detail"],
+                ensure_ascii=False,
+                indent=2
+            )[:4000],
+            flush=True
+        )
         return None
 
     urls = []
@@ -111,15 +139,21 @@ def get_stream(channel):
     urls = list(dict.fromkeys(urls))
 
     if not urls:
-        print("No HLS URLs found.")
-        print(json.dumps(
-            data,
-            ensure_ascii=False,
-            indent=2
-        )[:5000])
+        print("No HLS URLs found.", flush=True)
+        print("Response data:", flush=True)
+        print(
+            json.dumps(
+                data,
+                ensure_ascii=False,
+                indent=2
+            )[:5000],
+            flush=True
+        )
         return None
 
-    print(f"HLS URLS FOUND: {len(urls)}")
+    print(f"HLS URLS FOUND: {len(urls)}", flush=True)
+    print("Stream successfully captured.", flush=True)
+
     return urls[0]
 
 
@@ -139,26 +173,50 @@ def update_playlist(urls):
     temp.write_text(content, encoding="utf-8")
     os.replace(temp, PLAYLIST)
 
+    print("Playlist file updated.", flush=True)
+
 
 def main():
+    print("Starting RUTUBE stream capture.", flush=True)
+    print(f"Using proxy: {PROXY}", flush=True)
+
     streams = {}
 
     for channel in CHANNELS:
-        url = get_stream(channel)
+        try:
+            url = get_stream(channel)
 
-        if url:
-            streams[channel["id"]] = url
+            if url:
+                streams[channel["id"]] = url
+            else:
+                print(
+                    f"FAILED: {channel['name']} — stream not found.",
+                    flush=True
+                )
+
+        except Exception as error:
+            print(
+                f"UNEXPECTED ERROR for {channel['name']}: "
+                f"{type(error).__name__}: {error}",
+                flush=True
+            )
+            traceback.print_exc()
 
     if len(streams) != len(CHANNELS):
         print(
             "\nFAILED: not all streams were found. "
             "Existing playlist was not changed.",
             file=sys.stderr,
+            flush=True
         )
         sys.exit(1)
 
     update_playlist(streams)
-    print("\nSUCCESS: both streams saved to anime.m3u")
+
+    print(
+        "\nSUCCESS: both streams saved to anime.m3u",
+        flush=True
+    )
 
 
 if __name__ == "__main__":
