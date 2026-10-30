@@ -7,7 +7,7 @@ name: Update and publish anime playlist
     - cron: "0 */6 * * *"
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -37,11 +37,14 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y curl unzip
+
           curl -fL \
             https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-64.zip \
             -o xray.zip
+
           unzip -o xray.zip xray
           chmod +x xray
+
           ./xray version
 
       - name: Create Xray configuration
@@ -136,6 +139,20 @@ jobs:
 
       - name: Capture streams and update playlist
         run: python capture_stream.py
+
+      - name: Commit updated playlist
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add anime.m3u
+
+          if git diff --cached --quiet; then
+            echo "Playlist has not changed."
+          else
+            git commit -m "Update anime playlist"
+            git push
+          fi
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
