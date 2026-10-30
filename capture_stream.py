@@ -75,24 +75,16 @@ def get_stream(channel):
             "utf-8",
             errors="replace"
         )
-
         print(f"HTTP ERROR: {status}", flush=True)
-        print("Response body:", flush=True)
         print(body[:4000], flush=True)
 
     except URLError as error:
-        print(
-            f"URL ERROR: {type(error).__name__}: {error}",
-            flush=True
-        )
+        print(f"URL ERROR: {error}", flush=True)
         traceback.print_exc()
         return None
 
     except Exception as error:
-        print(
-            f"REQUEST FAILED: {type(error).__name__}: {error}",
-            flush=True
-        )
+        print(f"REQUEST FAILED: {error}", flush=True)
         traceback.print_exc()
         return None
 
@@ -102,7 +94,7 @@ def get_stream(channel):
         data = json.loads(body)
     except json.JSONDecodeError as error:
         print(f"INVALID JSON: {error}", flush=True)
-        print("Response body:", body[:4000], flush=True)
+        print(body[:4000], flush=True)
         return None
 
     print("RESPONSE KEYS:", list(data.keys()), flush=True)
@@ -140,7 +132,6 @@ def get_stream(channel):
 
     if not urls:
         print("No HLS URLs found.", flush=True)
-        print("Response data:", flush=True)
         print(
             json.dumps(
                 data,
@@ -157,23 +148,115 @@ def get_stream(channel):
     return urls[0]
 
 
+def get_channel_title(block):
+    for line in block:
+        if line.startswith("#EXTINF:"):
+            if "," in line:
+                return line.split(",", 1)[1].strip()
+    return None
+
+
+def replace_stream_url(block, new_url):
+    result = list(block)
+
+    for index, line in enumerate(result):
+        if line.strip() and not line.lstrip().startswith("#"):
+            result[index] = new_url
+            return result
+
+    result.append(new_url)
+    return result
+
+
 def update_playlist(urls):
-    lines = ["#EXTM3U"]
+    if PLAYLIST.exists():
+        lines = PLAYLIST.read_text(
+            encoding="utf-8-sig"
+        ).splitlines()
+    else:
+        lines = ["#EXTM3U"]
 
+    if not lines:
+        lines = ["#EXTM3U"]
+
+    if lines[0].strip() != "#EXTM3U":
+        lines.insert(0, "#EXTM3U")
+
+    # Разделяем плейлист на вступительную часть и блоки каналов.
+    prefix = []
+    blocks = []
+    current_block = None
+
+    for line in lines:
+        if line.startswith("#EXTINF:"):
+            if current_block is not None:
+                blocks.append(current_block)
+
+            current_block = [line]
+
+        elif current_block is not None:
+            current_block.append(line)
+
+        else:
+            prefix.append(line)
+
+    if current_block is not None:
+        blocks.append(current_block)
+
+    updated_channels = set()
+
+    # Обновляем только два указанных канала.
+    for index, block in enumerate(blocks):
+        title = get_channel_title(block)
+
+        for channel in CHANNELS:
+            channel_id = channel["id"]
+            channel_name = channel["name"]
+
+            if title == channel_name and channel_id not in updated_channels:
+                blocks[index] = replace_stream_url(
+                    block,
+                    urls[channel_id]
+                )
+
+                updated_channels.add(channel_id)
+
+                print(
+                    f"Updated existing channel: {channel_name}",
+                    flush=True
+                )
+
+                break
+
+    # Если одного из управляемых каналов ещё нет, добавляем его.
     for channel in CHANNELS:
-        lines.append(
-            f'#EXTINF:-1 {channel["tvg"]} '
-            f'group-title="Аниме",{channel["name"]}'
-        )
-        lines.append(urls[channel["id"]])
+        channel_id = channel["id"]
 
-    content = "\n".join(lines) + "\n"
+        if channel_id not in updated_channels:
+            blocks.append([
+                f'#EXTINF:-1 {channel["tvg"]} '
+                f'group-title="Аниме",{channel["name"]}',
+                urls[channel_id]
+            ])
+
+            print(
+                f"Added missing channel: {channel['name']}",
+                flush=True
+            )
+
+    # Собираем плейлист обратно.
+    output = list(prefix)
+
+    for block in blocks:
+        output.extend(block)
+
+    content = "\n".join(output).rstrip() + "\n"
 
     temp = PLAYLIST.with_suffix(".m3u.tmp")
     temp.write_text(content, encoding="utf-8")
     os.replace(temp, PLAYLIST)
 
-    print("Playlist file updated.", flush=True)
+    print("Playlist updated without touching other channels.", flush=True)
 
 
 def main():
@@ -202,6 +285,7 @@ def main():
             )
             traceback.print_exc()
 
+    # Не изменяем плейлист, если хотя бы один поток не получен.
     if len(streams) != len(CHANNELS):
         print(
             "\nFAILED: not all streams were found. "
@@ -214,7 +298,8 @@ def main():
     update_playlist(streams)
 
     print(
-        "\nSUCCESS: both streams saved to anime.m3u",
+        "\nSUCCESS: managed streams updated. "
+        "All other channels preserved.",
         flush=True
     )
 
