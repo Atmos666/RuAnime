@@ -3,6 +3,7 @@
 https://bl.rutube.ru/livestream/ec5267347fa50d03edba227906eba679/index.m3u8?s=vJnyrHzBddP33eF_n8RGJw&e=2093351983&scheme=https
 #EXTINF:-1 tvg-id="animach" group-title="Аниме",Анимач — аниме онлайн
 https://bl.rutube.ru/livestream/b3019a8983105f5e33f038246f860c32/index.m3u8?s=k_hX4m6hnw57PcmGkZAP2g&e=2093351984&scheme=https
+
 #EXTINF:-1 tvg-id="2x2.ru" tvg-name="2x2" group-title="ТВ",2х2
 https://bl.rutube.ru/livestream/392b4686b770bae2da6bf5ac4574add5/index.m3u8?e=2068731801&s=tenr-yHXUv1wibfka78s2A&scheme=https
 
@@ -11,5 +12,10 @@ http://stream.mcquack.net/443/index.m3u8
 
 #EXTINF:-1 group-title="Зарубежные мультканалы",Nicktoons CIS
 https://stream8.cinerama.uz/1502/playlist.m3u8
+
 #EXTINF:-1 group-title="Мультканалы",Cartoon Network CEE
 http://45.132.87.69:8080/cartoon_network/index.m3u8
+
+#EXTINF:-1 group-title="хз что, толи фильмы толи мульты",FAN
+http://stream.mcquack.net/420/index.m3u8
+
