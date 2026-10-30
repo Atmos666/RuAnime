@@ -5,3 +5,22 @@ https://bl.rutube.ru/livestream/ec5267347fa50d03edba227906eba679/index.m3u8?s=vJ
 https://bl.rutube.ru/livestream/b3019a8983105f5e33f038246f860c32/index.m3u8?s=k_hX4m6hnw57PcmGkZAP2g&e=2093351984&scheme=https
 #EXTINF:-1 tvg-id="2x2.ru" tvg-name="2x2" group-title="ТВ",2х2
 https://bl.rutube.ru/livestream/392b4686b770bae2da6bf5ac4574add5/index.m3u8?e=2068731801&s=tenr-yHXUv1wibfka78s2A&scheme=https
+#EXTINF:-1 group-title="Зарубежные мультканалы",Nick Jr.
+https://stream.mcquack.net/220/index.m3u8
+
+#EXTINF:-1 group-title="Зарубежные мультканалы",Nickelodeon
+http://stream.mcquack.net/443/index.m3u8
+
+#EXTINF:-1 group-title="Зарубежные мультканалы",Nicktoons CIS
+https://stream8.cinerama.uz/1502/playlist.m3u8
+
+#EXTINF:-1 group-title="Зарубежные мультканалы",TiJi
+http://flussonic.mkpnet.ru/tv-3848dd8604a262e0/video.m3u8
+
+#EXTINF:-1 group-title="Зарубежные мультканалы",Cartoon Network RU
+http://iptv.prosto.tv:7000/ch207/video.m3u8
+
+#EXTINF:-1 group-title="Зарубежные мультканалы",JimJam
+http://178.217.72.66:8080/JimJam/index.m3u8
+#EXTINF:-1 group-title="Зарубежные мультканалы",Cartoon Network Russia
+http://bkm.beetv.kz/btv/live/hls/000000015.m3u8
