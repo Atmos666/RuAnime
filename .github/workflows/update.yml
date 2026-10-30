@@ -12,8 +12,8 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
-  cancel-in-progress: true
+  group: anime-playlist-publishing
+  cancel-in-progress: false
 
 jobs:
   publish:
