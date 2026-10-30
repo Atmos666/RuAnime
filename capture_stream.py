@@ -3,11 +3,19 @@ import json
 import os
 import sys
 from pathlib import Path
-from urllib.request import Request, urlopen
+from urllib.request import Request, build_opener, ProxyHandler
 from urllib.error import HTTPError
-from urllib.parse import urlencode
 
 PLAYLIST = Path(__file__).with_name("anime.m3u")
+
+PROXY = "http://127.0.0.1:10809"
+
+OPENER = build_opener(
+    ProxyHandler({
+        "http": PROXY,
+        "https": PROXY,
+    })
+)
 
 CHANNELS = [
     {
@@ -29,43 +37,10 @@ USER_AGENT = (
 )
 
 
-def extract_urls(data):
-    urls = []
-
-    # Live streams
-    live = data.get("live_streams") or {}
-    hls = live.get("hls") or []
-
-    if isinstance(hls, list):
-        for item in hls:
-            if isinstance(item, dict) and item.get("url"):
-                urls.append(item["url"])
-
-    # Ordinary video balancer
-    balancer = data.get("video_balancer") or {}
-
-    if isinstance(balancer, dict):
-        for url in balancer.values():
-            if isinstance(url, str) and ".m3u8" in url.lower():
-                urls.append(url)
-
-    # Remove duplicates, preserve order
-    return list(dict.fromkeys(urls))
-
-
 def get_stream(channel):
     video_id = channel["id"]
     page_url = f"https://rutube.ru/live/video/{video_id}/"
-
-    params = urlencode({
-        "format": "json",
-        "no_404": "true",
-        "referer": page_url,
-    })
-
-    api_url = (
-        f"https://rutube.ru/api/play/options/{video_id}/?{params}"
-    )
+    api_url = f"https://rutube.ru/api/play/options/{video_id}/"
 
     request = Request(
         api_url,
@@ -80,13 +55,17 @@ def get_stream(channel):
     print(f"\nChecking: {channel['name']}", flush=True)
 
     try:
-        with urlopen(request, timeout=30) as response:
+        with OPENER.open(request, timeout=40) as response:
             status = response.status
-            body = response.read().decode("utf-8", errors="replace")
+            body = response.read().decode(
+                "utf-8", errors="replace"
+            )
 
     except HTTPError as error:
         status = error.code
-        body = error.read().decode("utf-8", errors="replace")
+        body = error.read().decode(
+            "utf-8", errors="replace"
+        )
 
     except Exception as error:
         print(f"REQUEST FAILED: {error}")
@@ -97,7 +76,7 @@ def get_stream(channel):
     try:
         data = json.loads(body)
     except json.JSONDecodeError:
-        print("Response is not JSON:")
+        print("Invalid JSON response:")
         print(body[:2000])
         return None
 
@@ -112,11 +91,27 @@ def get_stream(channel):
         )[:4000])
         return None
 
-    urls = extract_urls(data)
+    urls = []
+
+    live = data.get("live_streams") or {}
+    hls = live.get("hls") or []
+
+    if isinstance(hls, list):
+        for item in hls:
+            if isinstance(item, dict) and item.get("url"):
+                urls.append(item["url"])
+
+    balancer = data.get("video_balancer") or {}
+
+    if isinstance(balancer, dict):
+        for value in balancer.values():
+            if isinstance(value, str) and ".m3u8" in value.lower():
+                urls.append(value)
+
+    urls = list(dict.fromkeys(urls))
 
     if not urls:
         print("No HLS URLs found.")
-        print("API RESPONSE:")
         print(json.dumps(
             data,
             ensure_ascii=False,
