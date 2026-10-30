@@ -16,6 +16,9 @@ https://stream8.cinerama.uz/1502/playlist.m3u8
 #EXTINF:-1 group-title="Мультканалы",Cartoon Network CEE
 http://45.132.87.69:8080/cartoon_network/index.m3u8
 
+#EXTINF:-1 group-title="Детям" audio-track="rus", Cartoon Classics
+http://5.188.159.128:8070/Cartoon_Network/index.m3u8
+
 #EXTINF:-1 group-title="хз что, толи фильмы толи мульты",FAN
 http://stream.mcquack.net/420/index.m3u8
 
