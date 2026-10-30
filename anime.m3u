@@ -1,6 +1,5 @@
 #EXTM3U
 #EXTINF:-1 tvg-name="Наше Аниме" group-title="Аниме",Наше Аниме
-https://river-ntv-mfon-d434.rtbcdn.ru/stream/genetta-318.m9.rutube.ru/Lv7DHtpCDPrnVsTzm8_ZLg/1793885872/ec5267347fa50d03edba227906eba679/1080p_stream.m3u8
-
+https://bl.rutube.ru/livestream/ec5267347fa50d03edba227906eba679/index.m3u8?s=G47XmRxbHa7e6u5UZWafXg&e=2093347257&scheme=https
 #EXTINF:-1 tvg-id="animach" group-title="Аниме",Анимач — аниме онлайн
-https://river-ntv-mfon-d434.rtbcdn.ru/stream/genetta-320.m9.rutube.ru/KlM4BfVbKW5qFg1E9K9PFg/1793885882/b3019a8983105f5e33f038246f860c32/1080p_stream.m3u8
+https://bl.rutube.ru/livestream/b3019a8983105f5e33f038246f860c32/index.m3u8?s=EwA2_WOeN1RAKzHgd3jXRQ&e=2093347258&scheme=https
