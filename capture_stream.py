@@ -3,8 +3,9 @@ import json
 import os
 import sys
 from pathlib import Path
-
-import yt_dlp
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError
+from urllib.parse import urlencode
 
 PLAYLIST = Path(__file__).with_name("anime.m3u")
 
@@ -21,71 +22,110 @@ CHANNELS = [
     },
 ]
 
+USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
+
+def extract_urls(data):
+    urls = []
+
+    # Live streams
+    live = data.get("live_streams") or {}
+    hls = live.get("hls") or []
+
+    if isinstance(hls, list):
+        for item in hls:
+            if isinstance(item, dict) and item.get("url"):
+                urls.append(item["url"])
+
+    # Ordinary video balancer
+    balancer = data.get("video_balancer") or {}
+
+    if isinstance(balancer, dict):
+        for url in balancer.values():
+            if isinstance(url, str) and ".m3u8" in url.lower():
+                urls.append(url)
+
+    # Remove duplicates, preserve order
+    return list(dict.fromkeys(urls))
+
 
 def get_stream(channel):
-    url = f"https://rutube.ru/live/video/{channel['id']}/?no_404=true"
+    video_id = channel["id"]
+    page_url = f"https://rutube.ru/live/video/{video_id}/"
 
-    options = {
-        "quiet": True,
-        "no_warnings": True,
-        "noplaylist": True,
-        "skip_download": True,
-        "extractor_retries": 1,
-        "socket_timeout": 20,
-    }
+    params = urlencode({
+        "format": "json",
+        "no_404": "true",
+        "referer": page_url,
+    })
 
-    print(f"\nTesting yt-dlp: {channel['name']}", flush=True)
-
-    try:
-        with yt_dlp.YoutubeDL(options) as ydl:
-            info = ydl.extract_info(url, download=False)
-    except Exception as error:
-        print(f"EXTRACTION FAILED: {type(error).__name__}: {error}")
-        return None
-
-    if not info:
-        print("No video information returned.")
-        return None
-
-    formats = info.get("formats") or []
-
-    hls_formats = [
-        item for item in formats
-        if item.get("url")
-        and (
-            "m3u8" in (item.get("protocol") or "").lower()
-            or ".m3u8" in item["url"].lower()
-        )
-    ]
-
-    if not hls_formats:
-        print("No HLS format found.")
-        print("Available formats:")
-        for item in formats[:15]:
-            print(
-                f"  id={item.get('format_id')} "
-                f"protocol={item.get('protocol')} "
-                f"ext={item.get('ext')}"
-            )
-        return None
-
-    hls_formats.sort(
-        key=lambda item: (
-            item.get("height") or 0,
-            item.get("tbr") or 0,
-        )
+    api_url = (
+        f"https://rutube.ru/api/play/options/{video_id}/?{params}"
     )
 
-    chosen = hls_formats[-1]
-    stream_url = chosen["url"]
+    request = Request(
+        api_url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "ru-RU,ru;q=0.9",
+            "Referer": page_url,
+        },
+    )
 
-    print("HLS FOUND")
-    print(f"Format: {chosen.get('format_id')}")
-    print(f"Protocol: {chosen.get('protocol')}")
-    print(f"Resolution: {chosen.get('height') or 'unknown'}")
-    print(f"Title: {info.get('title', channel['name'])}")
+    print(f"\nChecking: {channel['name']}", flush=True)
 
-    return stream_url
+    try:
+        with urlopen(request, timeout=30) as response:
+            status = response.status
+            body = response.read().decode("utf-8", errors="replace")
+
+    except HTTPError as error:
+        status = error.code
+        body = error.read().decode("utf-8", errors="replace")
+
+    except Exception as error:
+        print(f"REQUEST FAILED: {error}")
+        return None
+
+    print(f"API STATUS: {status}")
+
+    try:
+        data = json.loads(body)
+    except json.JSONDecodeError:
+        print("Response is not JSON:")
+        print(body[:2000])
+        return None
+
+    print("RESPONSE KEYS:", list(data.keys()))
+
+    if "detail" in data:
+        print("RUTUBE BLOCK DETAILS:")
+        print(json.dumps(
+            data["detail"],
+            ensure_ascii=False,
+            indent=2
+        )[:4000])
+        return None
+
+    urls = extract_urls(data)
+
+    if not urls:
+        print("No HLS URLs found.")
+        print("API RESPONSE:")
+        print(json.dumps(
+            data,
+            ensure_ascii=False,
+            indent=2
+        )[:5000])
+        return None
+
+    print(f"HLS URLS FOUND: {len(urls)}")
+    return urls[0]
 
 
 def update_playlist(urls):
@@ -99,29 +139,31 @@ def update_playlist(urls):
         lines.append(urls[channel["id"]])
 
     content = "\n".join(lines) + "\n"
+
     temp = PLAYLIST.with_suffix(".m3u.tmp")
     temp.write_text(content, encoding="utf-8")
     os.replace(temp, PLAYLIST)
 
 
 def main():
-    urls = {}
+    streams = {}
 
     for channel in CHANNELS:
-        stream = get_stream(channel)
-        if stream:
-            urls[channel["id"]] = stream
+        url = get_stream(channel)
 
-    if len(urls) != len(CHANNELS):
+        if url:
+            streams[channel["id"]] = url
+
+    if len(streams) != len(CHANNELS):
         print(
-            "\nTEST FAILED: both channels were not extracted. "
-            "Existing playlist remains unchanged.",
+            "\nFAILED: not all streams were found. "
+            "Existing playlist was not changed.",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    update_playlist(urls)
-    print("\nSUCCESS: both HLS streams found; playlist updated.")
+    update_playlist(streams)
+    print("\nSUCCESS: both streams saved to anime.m3u")
 
 
 if __name__ == "__main__":
