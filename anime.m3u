@@ -1,8 +1,8 @@
 #EXTM3U
 #EXTINF:-1 tvg-name="Наше Аниме" group-title="Аниме",Наше Аниме
-https://bl.rutube.ru/livestream/ec5267347fa50d03edba227906eba679/index.m3u8?s=7yeVhH5IzfHN_Fwbe8Mwpg&e=2094351052&scheme=https
+https://bl.rutube.ru/livestream/ec5267347fa50d03edba227906eba679/index.m3u8?s=Vvtyg3bDjAL13oBNDlg3zQ&e=2094372210&scheme=https
 #EXTINF:-1 tvg-id="animach" group-title="Аниме",Анимач — аниме онлайн
-https://bl.rutube.ru/livestream/b3019a8983105f5e33f038246f860c32/index.m3u8?s=e_HF_KA_VGYGqJUX2SJ6GQ&e=2094351054&scheme=https
+https://bl.rutube.ru/livestream/b3019a8983105f5e33f038246f860c32/index.m3u8?s=482riSdSsl8a_hjceCHEgA&e=2094372212&scheme=https
 
 #EXTINF:-1 tvg-id="2x2.ru" tvg-name="2x2" group-title="ТВ",2х2
 https://bl.rutube.ru/livestream/392b4686b770bae2da6bf5ac4574add5/index.m3u8?e=2068731801&s=tenr-yHXUv1wibfka78s2A&scheme=https
