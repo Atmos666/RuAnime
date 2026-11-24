@@ -12,7 +12,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: anime-playlist-publishing
+  group: github-pages
   cancel-in-progress: false
 
 jobs:
